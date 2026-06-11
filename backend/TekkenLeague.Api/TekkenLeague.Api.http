@@ -1,0 +1,6 @@
+@TekkenLeague.Api_HostAddress = http://localhost:5078
+
+GET {{TekkenLeague.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
