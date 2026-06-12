@@ -121,8 +121,8 @@ app.MapGet("/api/auth/discord/callback", async (string? code, string? error, IHt
     using var userDocument = JsonDocument.Parse(userJson);
     var discordUser = userDocument.RootElement;
 
-    var discordId = discordUser.GetProperty("id").GetString();
-    var username = discordUser.GetProperty("username").GetString();
+    var discordId = discordUser.GetProperty("id").GetString() ?? string.Empty;
+    var username = discordUser.GetProperty("username").GetString() ?? string.Empty;
     var avatar = discordUser.TryGetProperty("avatar", out var avatarProperty)
         ? avatarProperty.GetString()
         : null;
@@ -153,18 +153,15 @@ app.MapGet("/api/auth/discord/callback", async (string? code, string? error, IHt
 
     await db.SaveChangesAsync();
 
-    return Results.Ok(new
-    {
-        message = "Discord login successful",
-        user = new
-        {
-            user.Id,
-            user.DiscordId,
-            user.Username,
-            user.AvatarUrl,
-            user.Role
-        }
-    });
+var frontendBaseUrl = builder.Configuration["Frontend:BaseUrl"] ?? "http://localhost:5173";
+
+    var successUrl =
+    $"{frontendBaseUrl}/auth/success" +
+    $"?userId={user.Id}" +
+    $"&username={Uri.EscapeDataString(user.Username)}" +
+    $"&avatarUrl={Uri.EscapeDataString(user.AvatarUrl ?? "")}";
+
+return Results.Redirect(successUrl);
 });
 
 app.Run();
