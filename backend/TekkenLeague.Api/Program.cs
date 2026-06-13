@@ -3,6 +3,9 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using TekkenLeague.Api.Data;
 using TekkenLeague.Api.Models;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,7 +19,27 @@ var discordClientId = builder.Configuration["Discord:ClientId"];
 var discordClientSecret = builder.Configuration["Discord:ClientSecret"];
 var discordRedirectUri = builder.Configuration["Discord:RedirectUri"];
 
+builder.Services
+    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.Cookie.Name = "dojo_league_auth";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Lax;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+
+        options.Events.OnRedirectToLogin = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        };
+    });
+
+builder.Services.AddAuthorization();
+
 var app = builder.Build();
+
+
 
 if (app.Environment.IsDevelopment())
 {
@@ -24,6 +47,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapGet("/api/health", () =>
 {
@@ -50,7 +75,12 @@ app.MapGet("/api/auth/discord/login", () =>
     return Results.Redirect(authorizeUrl);
 });
 
-app.MapGet("/api/auth/discord/callback", async (string? code, string? error, IHttpClientFactory httpClientFactory, TekkenLeagueDbContext db) =>
+app.MapGet("/api/auth/discord/callback", async (
+    string? code,
+    string? error,
+    IHttpClientFactory httpClientFactory,
+    TekkenLeagueDbContext db,
+    HttpContext httpContext) =>
 {
     if (!string.IsNullOrWhiteSpace(error))
     {
@@ -153,15 +183,74 @@ app.MapGet("/api/auth/discord/callback", async (string? code, string? error, IHt
 
     await db.SaveChangesAsync();
 
-var frontendBaseUrl = builder.Configuration["Frontend:BaseUrl"] ?? "http://localhost:5173";
+    var claims = new List<Claim>
+{
+    new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+    new(ClaimTypes.Name, user.Username),
+    new(ClaimTypes.Role, user.Role),
+    new("discord_id", user.DiscordId)
+};
 
-    var successUrl =
-    $"{frontendBaseUrl}/auth/success" +
-    $"?userId={user.Id}" +
-    $"&username={Uri.EscapeDataString(user.Username)}" +
-    $"&avatarUrl={Uri.EscapeDataString(user.AvatarUrl ?? "")}";
+var identity = new ClaimsIdentity(
+    claims,
+    CookieAuthenticationDefaults.AuthenticationScheme
+);
 
-return Results.Redirect(successUrl);
+var principal = new ClaimsPrincipal(identity);
+
+await httpContext.SignInAsync(
+    CookieAuthenticationDefaults.AuthenticationScheme,
+    principal,
+    new AuthenticationProperties
+    {
+        IsPersistent = true,
+        ExpiresUtc = DateTimeOffset.UtcNow.AddDays(7)
+    }
+);
+
+var frontendBaseUrl =
+    builder.Configuration["Frontend:BaseUrl"]
+    ?? "http://localhost:5173";
+
+return Results.Redirect($"{frontendBaseUrl}/auth/success");
+});
+
+app.MapGet("/api/auth/me", async (
+    ClaimsPrincipal principal,
+    TekkenLeagueDbContext db) =>
+{
+    var idValue = principal.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    if (!int.TryParse(idValue, out var userId))
+    {
+        return Results.Unauthorized();
+    }
+
+    var user = await db.Users.FindAsync(userId);
+
+    if (user is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    return Results.Ok(new
+    {
+        user.Id,
+        user.DiscordId,
+        user.Username,
+        user.AvatarUrl,
+        user.Role
+    });
+})
+.RequireAuthorization();
+
+app.MapPost("/api/auth/logout", async (HttpContext context) =>
+{
+    await context.SignOutAsync(
+        CookieAuthenticationDefaults.AuthenticationScheme
+    );
+
+    return Results.NoContent();
 });
 
 app.Run();
