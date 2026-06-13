@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tekkenleague-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: tekken_league
+      POSTGRES_USER: tekken_user
+      POSTGRES_PASSWORD: tekken_password
+    volumes:
+      - tekkenleague_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tekken_user -d tekken_league"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  tekkenleague_postgres_data:
