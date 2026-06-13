@@ -54,6 +54,6 @@
 		<p>Your local user ID is: {user.id}</p>
 		<p>Role: {user.role}</p>
 
-		<a href="/">Go to dashboard</a>
+		<a href="/dashboard">Go to dashboard</a>
 	{/if}
 </main>
